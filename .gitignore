@@ -37,3 +37,7 @@ Thumbs.db
 esp32_firmware/build/
 *.bin
 *.elf
+
+# Python bytecode (the UI/UX Pro Max skill scripts generate these on first run)
+__pycache__/
+*.pyc
