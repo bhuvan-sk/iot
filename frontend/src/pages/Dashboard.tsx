@@ -93,7 +93,6 @@ export const Dashboard = () => {
       if (zone === 'GARAGE') roomId = 'garage';
 
       if (roomId) {
-        console.log(`[Gesture] 15cm ONE_WAVE logic fired: Zone ${zone} -> Room Key '${roomId}'`);
         toggle(roomId);
         const device = devicesRef.current.find(d => d.id === roomId);
         const willBeOn = device ? device.state !== 'ON' : true;
