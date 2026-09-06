@@ -9,6 +9,8 @@ export interface WSMessage {
    * running firmware that does not send it - which is not the same as false.
    */
   motion?: boolean;
+  distance?: number;
+  distanceValid?: boolean;
 }
 
 type StateCallback = (state: WSConnectionState) => void;
@@ -65,7 +67,14 @@ class ESP32WebSocketService {
            * field is simply absent, which is what "we do not know" looks like
            * everywhere else in this codebase.
            */
-          if (typeof event.data === 'string' && event.data.includes(',')) {
+          if (typeof event.data === 'string' && event.data.startsWith('U,')) {
+            const [, distStr, validStr] = event.data.split(',');
+            const data: Omit<WSMessage, 'time'> = {
+              distance: parseFloat(distStr),
+              distanceValid: validStr === '1'
+            };
+            this.notifyMessage(data);
+          } else if (typeof event.data === 'string' && event.data.includes(',')) {
             const [tempStr, humStr, motionStr] = event.data.split(',');
             const temperature = parseFloat(tempStr);
             const humidity = parseFloat(humStr);
@@ -73,12 +82,11 @@ class ESP32WebSocketService {
             if (Number.isFinite(temperature)) data.temperature = temperature;
             if (Number.isFinite(humidity)) data.humidity = humidity;
             if (motionStr !== undefined) data.motion = motionStr.trim() === '1';
-            console.log('[ESP32] Sensor data received (CSV)', data);
+            // slow frame, ok to log
             this.notifyMessage(data);
           } else {
             // Fallback to JSON if used
             const data = JSON.parse(event.data);
-            console.log('[ESP32] Sensor data received (JSON)', data);
             this.notifyMessage(data);
           }
         } catch (e) {

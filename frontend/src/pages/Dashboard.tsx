@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { HouseScene3D } from '../components/house3d/HouseScene3D';
 
@@ -9,6 +9,7 @@ import { useRoomAutomation } from '../hooks/useRoomAutomation';
 import { roomById } from '../config/rooms';
 import { esp32WS } from '../services/esp32WebSocket';
 import { useGestures } from '../hooks/useGestures';
+import type { GestureCommand, GestureSpatialZone } from '../hooks/useGestures';
 import { Settings, X, Moon, Sun, MonitorPlay, Shield } from 'lucide-react';
 
 export const Dashboard = () => {
@@ -21,9 +22,26 @@ export const Dashboard = () => {
   const httpChannel = useHttpChannel();
   const garageInfo = useGarage();
   const ambientLight = useAmbientLight();
-  const gestures = useGestures();
-  const sensors = useSensors();
   const { evaluations, setMode } = useRoomAutomation();
+
+  const handleGesture = useCallback((cmd: GestureCommand, zone: GestureSpatialZone) => {
+    if (cmd === 'ONE_WAVE' && zone) {
+      if (zone === 'BEDROOM') toggle('bedroom');
+      if (zone === 'LIVING_ROOM') toggle('living-room');
+      if (zone === 'KITCHEN') toggle('kitchen');
+    } else if (cmd === 'TWO_WAVES') {
+      // Virtual mode only - no fan hardware exists
+      // We'll reset mode to NORMAL to simulate 'airflow' for now
+      setGlobalMode('NORMAL');
+    } else if (cmd === 'THREE_WAVES') {
+      setGlobalMode('ENTERTAINMENT');
+    } else if (cmd === 'HOLD') {
+      setGlobalMode('SECURITY');
+    }
+  }, [toggle]);
+
+  const gestures = useGestures(handleGesture);
+  const sensors = useSensors();
 
   const dhtOnline = connectionState === 'connected';
   const controlOnline = import.meta.env.VITE_USE_REAL_ESP32 === 'true' ? httpChannel !== 'offline' : true;
@@ -66,6 +84,7 @@ export const Dashboard = () => {
             }}
             globalMode={globalMode}
             ambientLightBand={ambientLight.band}
+            gesturesEnabled={gestures.state.enabled}
           />
         </div>
 
@@ -87,6 +106,17 @@ export const Dashboard = () => {
           </div>
 
           <div className="flex items-center gap-3 pointer-events-auto">
+            {/* Gestures Toggle */}
+            <button
+              onClick={gestures.toggleGestures}
+              className={clsx(
+                "px-3 py-1.5 rounded-full text-[10px] font-bold tracking-[0.15em] border transition-all duration-300 backdrop-blur-md shadow-lg",
+                gestures.state.enabled ? "bg-white/20 border-white/40 text-white" : "bg-black/40 border-white/10 text-white/40"
+              )}
+            >
+              GESTURES {gestures.state.enabled ? 'ON' : 'OFF'}
+            </button>
+
             <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-full p-1 flex items-center shadow-lg">
               {(['NORMAL', 'NIGHT', 'ENTERTAINMENT', 'SECURITY'] as const).map(mode => (
                 <button 
@@ -119,12 +149,12 @@ export const Dashboard = () => {
         </div>
 
         {/* Gesture Context Overlay */}
-        {gestures.lastCommand && gestures.lastCommand !== 'CANCEL' && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300">
+        {gestures.state.lastCommand && gestures.state.lastCommand !== 'CANCEL' && (
+          <div key={gestures.state.recognizedAt} className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300 fade-out slide-out-to-top-4">
             <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl px-6 py-3 flex flex-col items-center shadow-2xl">
-              <span className="text-[10px] font-bold tracking-[0.2em] text-white/60 mb-1">GESTURE DETECTED</span>
+              <span className="text-[10px] font-bold tracking-[0.2em] text-emerald-400/90 mb-1">GESTURE RECOGNIZED</span>
               <span className="text-sm font-semibold tracking-wider text-white">
-                {gestures.lastCommand.replace('_', ' ')} {gestures.spatialZone ? `— ${gestures.spatialZone}` : ''}
+                {gestures.state.lastCommand.replace('_', ' ')} {gestures.state.spatialZone ? `— ${gestures.state.spatialZone.replace('_', ' ')}` : ''}
               </span>
             </div>
           </div>

@@ -8,11 +8,13 @@ import { ROOM_VOLUMES, CEILING_H } from './model';
 import { Architecture } from './Architecture';
 import { AllFurniture, Pendant } from './Furniture';
 import { useDevices } from '../../hooks/useDevices';
+import { useDoors, type DoorState } from '../../hooks/useDoors';
+import { esp32WS } from '../../services/esp32WebSocket';
+import type { WSMessage } from '../../services/esp32WebSocket';
 
 // First-person camera height
 const EYE_LEVEL = 1.6;
 
-import { useDoors, type DoorState } from '../../hooks/useDoors';
 
 const isInBounds = (x: number, z: number, doors: Record<string, DoorState>) => {
   // Living (0-7, 0-6)
@@ -232,7 +234,8 @@ export const HouseScene3D: React.FC<{
   onSelectRoom: (roomId: string) => void;
   globalMode: 'NORMAL' | 'NIGHT' | 'ENTERTAINMENT' | 'SECURITY';
   ambientLightBand: string | null;
-}> = ({ devices, selectedRoomId, onSelectRoom, globalMode, ambientLightBand }) => {
+  gesturesEnabled: boolean;
+}> = ({ devices, selectedRoomId, onSelectRoom, globalMode, ambientLightBand, gesturesEnabled }) => {
   const [fpMode, setFpMode] = useState(false);
   const [currentLoc, setCurrentLoc] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(false);
@@ -253,6 +256,39 @@ export const HouseScene3D: React.FC<{
   const handleLocChange = useCallback((loc: string | null) => {
     setCurrentLoc((prev) => (prev !== loc ? loc : prev));
   }, []);
+
+  const UltrasonicViz = ({ enabled }: { enabled: boolean }) => {
+    const [dist, setDist] = useState<number | null>(null);
+    useEffect(() => {
+      if (!enabled) return;
+      const unsub = esp32WS.onMessage((msg: WSMessage) => {
+        if (msg.distanceValid && msg.distance !== undefined) {
+          setDist(msg.distance);
+        } else {
+          setDist(null);
+        }
+      });
+      return () => { unsub(); };
+    }, [enabled]);
+
+    if (!enabled) return null;
+
+    return (
+      <Html position={[9.5, 2.0, 9.0]} center pointerEvents="none" zIndexRange={[100, 0]}>
+        <div className="bg-black/60 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg flex flex-col items-center shadow-lg transition-opacity duration-300">
+          <span className="text-[9px] font-bold tracking-widest text-white/50 mb-1">HC-SR04</span>
+          {dist !== null && dist <= 30 ? (
+            <>
+              <span className="text-xs text-emerald-400 font-semibold mb-0.5 animate-pulse">Hand detected</span>
+              <span className="text-[10px] text-white/80 font-mono">{dist.toFixed(1)} cm</span>
+            </>
+          ) : (
+            <span className="text-[10px] text-white/40">Searching...</span>
+          )}
+        </div>
+      </Html>
+    );
+  };
 
   return (
     <div className="relative w-full h-full">
@@ -322,6 +358,7 @@ export const HouseScene3D: React.FC<{
 
         <Architecture />
         <AllFurniture />
+        <UltrasonicViz enabled={gesturesEnabled} />
 
         {ROOM_VOLUMES.filter((r) => r.controllable).map((r) => (
           <Pendant key={`pd-${r.id}`} p={r.light} ceiling={CEILING_H} on={litRooms.has(r.id)} 

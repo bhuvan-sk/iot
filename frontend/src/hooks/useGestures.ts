@@ -1,99 +1,177 @@
-import { useEffect, useRef, useState } from 'react';
-import { useSensors } from './useSensors';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { esp32WS } from '../services/esp32WebSocket';
 
 export type GestureCommand = 'ONE_WAVE' | 'TWO_WAVES' | 'THREE_WAVES' | 'HOLD' | 'CANCEL';
-export type GestureSpatialZone = 'BEDROOM' | 'LIVING_ROOM' | 'KITCHEN' | 'GARAGE' | null;
+export type GestureSpatialZone = 'BEDROOM' | 'LIVING_ROOM' | 'KITCHEN' | null;
 
 export interface GestureState {
+  enabled: boolean;
   lastCommand: GestureCommand | null;
   spatialZone: GestureSpatialZone;
-  activeSequence: number;
+  recognizedAt: number | null;
 }
 
-// Distance zones based on prompt
-// 5-10cm = BEDROOM
-// 10-20cm = LIVING ROOM
-// 20-30cm = KITCHEN
-// 30-40cm = GARAGE
-const determineZone = (distance: number): GestureSpatialZone => {
-  if (distance >= 5 && distance < 10) return 'BEDROOM';
-  if (distance >= 10 && distance < 20) return 'LIVING_ROOM';
-  if (distance >= 20 && distance < 30) return 'KITCHEN';
-  if (distance >= 30 && distance <= 40) return 'GARAGE';
+const GESTURE_CONFIG = {
+  maxWaveDistance: 30, // anything beyond 30 is out of gesture range
+  minWaveDurationMs: 50,
+  maxWaveDurationMs: 1200,
+  waveGapMaxMs: 1000, // time to wait for another wave
+  holdDurationMs: 3000,
+  cooldownDurationMs: 2000,
+  hysteresisMs: 300 // time to settle in a zone
+};
+
+const determineZone = (d: number): GestureSpatialZone => {
+  if (d >= 5 && d <= 10) return 'BEDROOM';
+  if (d > 10 && d <= 20) return 'LIVING_ROOM';
+  if (d > 20 && d <= 30) return 'KITCHEN';
   return null;
 };
 
-// Temporal thresholds
-// Since poll interval is 1s, temporal states must accommodate slow updates.
-// We'll consider a "wave" as distance falling into a valid zone, then leaving it within 3-4 polls.
-export const useGestures = () => {
-  const sensors = useSensors();
-  const distance = sensors.reading?.distance ?? null;
-  const valid = sensors.reading?.distanceValid ?? false;
+// Global state for enable/disable to survive unmounts
+let globalGesturesEnabled = true;
 
+export const useGestures = (onGesture?: (cmd: GestureCommand, zone: GestureSpatialZone) => void) => {
   const [state, setState] = useState<GestureState>({
+    enabled: globalGesturesEnabled,
     lastCommand: null,
     spatialZone: null,
-    activeSequence: 0
+    recognizedAt: null
   });
 
-  const history = useRef<{ ts: number, dist: number }[]>([]);
-  const waveCount = useRef(0);
-  const waveTimer = useRef<number | null>(null);
-  const holding = useRef(false);
+  const toggleGestures = useCallback(() => {
+    globalGesturesEnabled = !globalGesturesEnabled;
+    setState(s => ({ ...s, enabled: globalGesturesEnabled }));
+  }, []);
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const onGestureRef = useRef(onGesture);
+  onGestureRef.current = onGesture;
+
+  // Engine state
+  const engine = useRef({
+    state: 'IDLE' as 'IDLE' | 'TRACKING' | 'WAITING_FOR_NEXT_WAVE' | 'COOLDOWN',
+    zone: null as GestureSpatialZone,
+    zoneEntryTime: 0,
+    waves: 0,
+    lastWaveEndTime: 0,
+    holdFired: false
+  });
 
   useEffect(() => {
-    if (!valid || distance === null) return;
-    const now = Date.now();
-    history.current.push({ ts: now, dist: distance });
-    if (history.current.length > 10) history.current.shift(); // keep last 10s
+    const unsub = esp32WS.onMessage((msg) => {
+      if (!globalGesturesEnabled) return;
+      if (msg.distance === undefined || !msg.distanceValid) return;
 
-    const zone = determineZone(distance);
-    
-    // HOLD detection
-    if (zone && !holding.current) {
-      // Check if we've been in roughly the same zone for 3 seconds (3 polls)
-      const recent = history.current.slice(-4);
-      if (recent.length >= 4) {
-        const allInZone = recent.every(r => determineZone(r.dist) === zone);
-        if (allInZone) {
-          holding.current = true;
-          setState({ lastCommand: 'HOLD', spatialZone: zone, activeSequence: 0 });
-          return;
+      const d = msg.distance;
+      const now = Date.now();
+      const eng = engine.current;
+
+      if (eng.state === 'COOLDOWN') {
+        if (now - eng.lastWaveEndTime > GESTURE_CONFIG.cooldownDurationMs) {
+          eng.state = 'IDLE';
+          eng.zone = null;
+          setState(s => ({ ...s, spatialZone: null, lastCommand: null }));
+        }
+        return;
+      }
+
+      const currentRawZone = determineZone(d);
+      
+      // Update stable zone for UI
+      if (currentRawZone !== eng.zone) {
+        if (currentRawZone !== null) {
+          if (now - eng.zoneEntryTime > GESTURE_CONFIG.hysteresisMs) {
+            eng.zone = currentRawZone;
+            eng.zoneEntryTime = now;
+            setState(s => ({ ...s, spatialZone: currentRawZone }));
+          }
+        } else {
+          // Instantly leave zone if we pull away
+          eng.zoneEntryTime = now;
+        }
+      } else {
+        eng.zoneEntryTime = now; // reset hysteresis timer while in same zone
+      }
+
+      if (eng.state === 'IDLE') {
+        if (currentRawZone !== null) {
+          eng.state = 'TRACKING';
+          eng.zoneEntryTime = now;
+          eng.holdFired = false;
+        }
+      } 
+      else if (eng.state === 'TRACKING') {
+        if (currentRawZone !== null) {
+          // Check hold
+          if (!eng.holdFired && now - eng.zoneEntryTime > GESTURE_CONFIG.holdDurationMs) {
+            eng.holdFired = true;
+            eng.state = 'COOLDOWN';
+            eng.lastWaveEndTime = now;
+            eng.zone = null;
+            setState(s => ({ ...s, lastCommand: 'HOLD', spatialZone: eng.zone, recognizedAt: now }));
+            if (onGestureRef.current) onGestureRef.current('HOLD', eng.zone);
+          }
+        } else {
+          // Pulled away
+          const duration = now - eng.zoneEntryTime;
+          if (duration >= GESTURE_CONFIG.minWaveDurationMs && duration <= GESTURE_CONFIG.maxWaveDurationMs && !eng.holdFired) {
+            eng.waves++;
+            eng.state = 'WAITING_FOR_NEXT_WAVE';
+            eng.lastWaveEndTime = now;
+          } else {
+            // Cancel or too long/short
+            eng.state = 'IDLE';
+            if (!eng.holdFired && eng.waves > 0) {
+               setState(s => ({ ...s, lastCommand: 'CANCEL', recognizedAt: now }));
+               if (onGestureRef.current) onGestureRef.current('CANCEL', null);
+            }
+            eng.waves = 0;
+            eng.zone = null;
+            setState(s => ({ ...s, spatialZone: null }));
+          }
         }
       }
-    }
+      else if (eng.state === 'WAITING_FOR_NEXT_WAVE') {
+        if (currentRawZone !== null) {
+          // Back in! Another wave starts
+          if (now - eng.lastWaveEndTime < GESTURE_CONFIG.waveGapMaxMs) {
+            eng.state = 'TRACKING';
+            eng.zoneEntryTime = now;
+            eng.holdFired = false;
+          } else {
+            // Gap was too long, reset
+            eng.state = 'TRACKING';
+            eng.waves = 0;
+            eng.zoneEntryTime = now;
+            eng.holdFired = false;
+          }
+        } else {
+          // Waiting...
+          if (now - eng.lastWaveEndTime > GESTURE_CONFIG.waveGapMaxMs) {
+            // Time's up, execute waves!
+            const finalWaves = eng.waves;
+            const finalZone = stateRef.current.spatialZone;
+            
+            eng.state = 'COOLDOWN';
+            eng.lastWaveEndTime = now;
+            eng.waves = 0;
+            eng.zone = null;
 
-    if (!zone && holding.current) {
-      // Pulled hand away after hold
-      holding.current = false;
-      setState({ lastCommand: 'CANCEL', spatialZone: null, activeSequence: 0 });
-      return;
-    }
+            let cmd: GestureCommand = 'ONE_WAVE';
+            if (finalWaves === 2) cmd = 'TWO_WAVES';
+            if (finalWaves >= 3) cmd = 'THREE_WAVES';
 
-    // WAVE detection
-    // A wave is a dip into a zone and back out
-    const last = history.current[history.current.length - 2];
-    if (last && zone === null && determineZone(last.dist) !== null && !holding.current) {
-      const activeZone = determineZone(last.dist);
-      waveCount.current += 1;
-      
-      if (waveTimer.current) window.clearTimeout(waveTimer.current);
-      
-      setState(s => ({ ...s, activeSequence: waveCount.current, spatialZone: activeZone }));
-      
-      // Wait to see if more waves happen
-      waveTimer.current = window.setTimeout(() => {
-        let cmd: GestureCommand = 'ONE_WAVE';
-        if (waveCount.current === 2) cmd = 'TWO_WAVES';
-        if (waveCount.current >= 3) cmd = 'THREE_WAVES';
-        
-        setState({ lastCommand: cmd, spatialZone: activeZone, activeSequence: 0 });
-        waveCount.current = 0;
-      }, 2500); // Wait 2.5s to resolve wave count
-    }
+            setState(s => ({ ...s, lastCommand: cmd, spatialZone: null, recognizedAt: now }));
+            if (onGestureRef.current) onGestureRef.current(cmd, finalZone);
+          }
+        }
+      }
+    });
 
-  }, [distance, valid]);
+    return () => { unsub(); };
+  }, []);
 
-  return state;
+  return { state, toggleGestures };
 };

@@ -94,7 +94,7 @@ DHT dht(DHTPIN, DHTTYPE);
 const unsigned long ULTRASONIC_TIMEOUT_US = 25000UL;
 const float ULTRASONIC_MAX_CM = 400.0f;
 const float ULTRASONIC_MIN_CM = 2.0f;
-const unsigned long ULTRASONIC_INTERVAL_MS = 300;
+const unsigned long ULTRASONIC_INTERVAL_MS = 50;
 
 // -------------------------------------------------------- LDR / GPIO 34 ---
 // Input-only ADC1 pin. Never set to OUTPUT.
@@ -546,6 +546,13 @@ void loop() {
   if (now - lastUltrasonicRead >= ULTRASONIC_INTERVAL_MS) {
     lastUltrasonicRead = now;
     lastDistanceCm = readDistanceCm();
+
+    // High-frequency telemetry for gesture engine
+    String uPayload = "U,";
+    uPayload += (lastDistanceCm < 0) ? "0.0" : String(lastDistanceCm, 1);
+    uPayload += ",";
+    uPayload += (lastDistanceCm < 0) ? "0" : "1";
+    webSocket.broadcastTXT(uPayload);
   }
 
   // ---- LDR: sampled less often, also re-checks availability ----
