@@ -14,11 +14,6 @@ export interface GestureState {
 }
 
 const GESTURE_CONFIG = {
-  // Zones
-  zoneBedroom: [5, 10],
-  zoneLiving: [10.1, 20],
-  zoneKitchen: [20.1, 30],
-  zoneGarage: [30.1, 40],
   // Timing
   hysteresisMs: 150, // Minimum time hand must be stable in a zone to count
   waveDurationMaxMs: 1200, // Maximum time hand can stay in zone for a wave
@@ -26,10 +21,10 @@ const GESTURE_CONFIG = {
 };
 
 const determineZone = (d: number): GestureSpatialZone => {
-  if (d >= GESTURE_CONFIG.zoneBedroom[0] && d <= GESTURE_CONFIG.zoneBedroom[1]) return 'BEDROOM';
-  if (d >= GESTURE_CONFIG.zoneLiving[0] && d <= GESTURE_CONFIG.zoneLiving[1]) return 'LIVING_ROOM';
-  if (d >= GESTURE_CONFIG.zoneKitchen[0] && d <= GESTURE_CONFIG.zoneKitchen[1]) return 'KITCHEN';
-  if (d >= GESTURE_CONFIG.zoneGarage[0] && d <= GESTURE_CONFIG.zoneGarage[1]) return 'GARAGE';
+  if (d >= 5 && d <= 10) return 'BEDROOM';
+  if (d > 10 && d <= 20) return 'LIVING_ROOM';
+  if (d > 20 && d <= 30) return 'KITCHEN';
+  if (d > 30 && d <= 40) return 'GARAGE';
   return null;
 };
 
