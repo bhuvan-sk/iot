@@ -258,17 +258,37 @@ export const HouseScene3D: React.FC<{
   }, []);
 
   const UltrasonicViz = ({ enabled }: { enabled: boolean }) => {
-    const [dist, setDist] = useState<number | null>(null);
+    const [displayDist, setDisplayDist] = useState<number | null>(null);
+    const lastValidTime = useRef<number>(0);
+    const lastValidDist = useRef<number | null>(null);
+    const rawDist = useRef<number | null>(null);
+
     useEffect(() => {
       if (!enabled) return;
       const unsub = esp32WS.onMessage((msg: WSMessage) => {
         if (msg.distanceValid && msg.distance !== undefined) {
-          setDist(msg.distance);
+          lastValidTime.current = Date.now();
+          lastValidDist.current = msg.distance;
+          rawDist.current = msg.distance;
         } else {
-          setDist(null);
+          rawDist.current = null;
         }
       });
-      return () => { unsub(); };
+
+      const intervalId = setInterval(() => {
+        const now = Date.now();
+        // Hysteresis: wait 400ms before declaring it missing visually
+        if (rawDist.current === null && (now - lastValidTime.current > 400)) {
+          setDisplayDist(null);
+        } else if (lastValidTime.current > 0) {
+          setDisplayDist(lastValidDist.current);
+        }
+      }, 100); // Throttle visual updates to ~10 FPS
+
+      return () => { 
+        unsub();
+        clearInterval(intervalId);
+      };
     }, [enabled]);
 
     if (!enabled) return null;
@@ -277,10 +297,10 @@ export const HouseScene3D: React.FC<{
       <Html position={[9.5, 2.0, 9.0]} center pointerEvents="none" zIndexRange={[100, 0]}>
         <div className="bg-black/60 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg flex flex-col items-center shadow-lg transition-opacity duration-300">
           <span className="text-[9px] font-bold tracking-widest text-white/50 mb-1">HC-SR04</span>
-          {dist !== null && dist <= 30 ? (
+          {displayDist !== null && displayDist <= 30 ? (
             <>
               <span className="text-xs text-emerald-400 font-semibold mb-0.5 animate-pulse">Hand detected</span>
-              <span className="text-[10px] text-white/80 font-mono">{dist.toFixed(1)} cm</span>
+              <span className="text-[10px] text-white/80 font-mono">{displayDist.toFixed(1)} cm</span>
             </>
           ) : (
             <span className="text-[10px] text-white/40">Searching...</span>
