@@ -79,19 +79,27 @@ export const Dashboard = () => {
   const ambientLight = useAmbientLight();
   const { evaluations, setMode } = useRoomAutomation();
 
+  const [gestureFeedback, setGestureFeedback] = useState<string | null>(null);
+
+  const devicesRef = useRef(devices);
+  devicesRef.current = devices;
+
   const handleGesture = useCallback((cmd: GestureCommand, zone: GestureSpatialZone) => {
     if (cmd === 'ONE_WAVE' && zone) {
-      if (zone === 'BEDROOM') toggle('bedroom');
-      if (zone === 'LIVING_ROOM') toggle('living-room');
-      if (zone === 'KITCHEN') toggle('kitchen');
-    } else if (cmd === 'TWO_WAVES') {
-      // Virtual mode only - no fan hardware exists
-      // We'll reset mode to NORMAL to simulate 'airflow' for now
-      setGlobalMode('NORMAL');
-    } else if (cmd === 'THREE_WAVES') {
-      setGlobalMode('ENTERTAINMENT');
-    } else if (cmd === 'HOLD') {
-      setGlobalMode('SECURITY');
+      let roomId = '';
+      if (zone === 'BEDROOM') roomId = 'bedroom';
+      if (zone === 'LIVING_ROOM') roomId = 'living-room';
+      if (zone === 'KITCHEN') roomId = 'kitchen';
+
+      if (roomId) {
+        toggle(roomId);
+        const device = devicesRef.current.find(d => d.id === roomId);
+        const willBeOn = device ? device.state !== 'ON' : true;
+        setGestureFeedback(`SINGLE WAVE — ${zone.replace('_', ' ')} LIGHT ${willBeOn ? 'ON' : 'OFF'}`);
+        
+        // Hide feedback after 3 seconds
+        setTimeout(() => setGestureFeedback(null), 3000);
+      }
     }
   }, [toggle]);
 
@@ -202,13 +210,23 @@ export const Dashboard = () => {
           </div>
         </div>
 
+        {/* Selected Zone UI */}
+        {gestures.state.enabled && gestures.state.spatialZone && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-5 py-2 flex items-center gap-2 shadow-lg">
+              <span className="text-[10px] font-bold tracking-[0.2em] text-white/60 uppercase">TARGET ROOM</span>
+              <span className="text-[10px] text-white/40">|</span>
+              <span className="text-xs font-bold tracking-wider text-emerald-400">{gestures.state.spatialZone.replace('_', ' ')}</span>
+            </div>
+          </div>
+        )}
+
         {/* Gesture Context Overlay */}
-        {gestures.state.lastCommand && gestures.state.lastCommand !== 'CANCEL' && (
-          <div key={gestures.state.recognizedAt} className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300 fade-out slide-out-to-top-4">
+        {gestureFeedback && (
+          <div key={gestures.state.recognizedAt} className="absolute top-36 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300 fade-out slide-out-to-top-4">
             <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl px-6 py-3 flex flex-col items-center shadow-2xl">
-              <span className="text-[10px] font-bold tracking-[0.2em] text-emerald-400/90 mb-1">GESTURE RECOGNIZED</span>
               <span className="text-sm font-semibold tracking-wider text-white">
-                {gestures.state.lastCommand.replace('_', ' ')} {gestures.state.spatialZone ? `— ${gestures.state.spatialZone.replace('_', ' ')}` : ''}
+                {gestureFeedback}
               </span>
             </div>
           </div>
