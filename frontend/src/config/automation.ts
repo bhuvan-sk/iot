@@ -78,14 +78,10 @@ export const THRESHOLD_LIMITS = {
  * opts in per room.
  */
 export const DEFAULT_ROOM_AUTOMATION: Record<string, RoomAutomationConfig> = {
-  // Living Room - red, GPIO 26
-  'dev-red-light': { mode: 'MANUAL', darknessThreshold: 1200, presenceThresholdCm: 100 },
-  // Bedroom - green, GPIO 17
-  'dev-green-light': { mode: 'MANUAL', darknessThreshold: 1000, presenceThresholdCm: 80 },
-  // Kitchen - yellow, GPIO 25
-  'dev-yellow-light': { mode: 'MANUAL', darknessThreshold: 1400, presenceThresholdCm: 120 },
-  // Hallway - blue, GPIO 19
-  'dev-blue-light': { mode: 'MANUAL', darknessThreshold: 800, presenceThresholdCm: 100 },
+  'living': { mode: 'MANUAL', darknessThreshold: 1200, presenceThresholdCm: 100 },
+  'bedroom': { mode: 'MANUAL', darknessThreshold: 1000, presenceThresholdCm: 80 },
+  'kitchen': { mode: 'MANUAL', darknessThreshold: 1400, presenceThresholdCm: 120 },
+  'garage': { mode: 'MANUAL', darknessThreshold: 800, presenceThresholdCm: 100 },
 };
 
 export const AUTOMATION_STORAGE_KEY = 'smarthome.roomAutomation.v1';

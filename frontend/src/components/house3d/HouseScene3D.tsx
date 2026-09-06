@@ -1,297 +1,344 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls, PointerLockControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { clsx } from 'clsx';
 import type { Device } from '../../types';
 import { ROOM_VOLUMES, CEILING_H } from './model';
-import { GhostingGroup, CAD } from './Cad';
-import { Interior } from './Interior';
-import { Pendant, Car } from './Furniture';
+import { Architecture } from './Architecture';
+import { AllFurniture, Pendant } from './Furniture';
+import { useDevices } from '../../hooks/useDevices';
 
-/**
- * The digital twin.
- *
- * Architecture follows design-ref.png: a CAD hidden-line building with real
- * ceiling heights and a dense furniture mesh, drawn in white with black edges.
- * Surfaces that would occlude the interior ghost to line work as the camera
- * moves, so the structure stays exposed from any angle.
- *
- * Everything that changes at runtime is deliberately narrow: the room lights,
- * the selection ring, and whether a car is drawn. The building itself is
- * memoised and never rebuilt by a sensor tick.
- */
+// First-person camera height
+const EYE_LEVEL = 1.6;
 
-interface HouseScene3DProps {
-  devices: Device[];
-  selectedRoomId: string | null;
-  onSelectRoom: (roomId: string) => void;
-  garageOccupied: boolean;
-  garageOnline: boolean;
-}
+import { useDoors, type DoorState } from '../../hooks/useDoors';
 
-/** Warm interior light for a room whose physical LED is on. */
+const isInBounds = (x: number, z: number, doors: Record<string, DoorState>) => {
+  // Living (0-7, 0-6)
+  if (x > 0.2 && x < 6.8 && z > 0.2 && z < 5.8) return true;
+  // Kitchen (7-12, 0-6)
+  if (x > 7.2 && x < 11.8 && z > 0.2 && z < 5.8) return true;
+  // Bedroom (0-6, 6-11)
+  if (x > 0.2 && x < 5.8 && z > 6.2 && z < 10.8) return true;
+  // Garage (6-12, 6-12)
+  if (x > 6.2 && x < 11.8 && z > 6.2 && z < 10.8) return true;
+
+  // Doorway Living-Kitchen (x: 6.8-7.2, z: 1.0-2.2) (Cased Opening)
+  if (x >= 6.8 && x <= 7.2 && z > 1.0 && z < 2.2) return true;
+  
+  // Doorway Living-Bedroom (x: 2.0-3.2, z: 5.8-6.2)
+  if (x > 2.0 && x < 3.2 && z >= 5.8 && z <= 6.2) {
+    if (!doors['bedroom']?.isOpen) return false;
+    return true;
+  }
+  
+  // Doorway Kitchen-Garage (x: 7.0-8.2, z: 5.8-6.2)
+  if (x > 7.0 && x < 8.2 && z >= 5.8 && z <= 6.2) {
+    if (!doors['garage']?.isOpen) return false;
+    return true;
+  }
+
+  return false;
+};
+
+const FirstPersonCamera: React.FC<{ active: boolean; onLocationChange: (loc: string | null) => void }> = ({ active, onLocationChange }) => {
+  const { camera } = useThree();
+  const direction = useRef(new THREE.Vector3());
+  const moveForward = useRef(false);
+  const moveBackward = useRef(false);
+  const moveLeft = useRef(false);
+  const moveRight = useRef(false);
+  const sprint = useRef(false);
+
+
+  useEffect(() => {
+    if (active) {
+      camera.position.set(3.5, EYE_LEVEL, 3.0);
+      camera.lookAt(3.5, EYE_LEVEL, 0); // Face North towards the TV/Kitchen
+    }
+  }, [active, camera]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      switch (e.code) {
+        case 'KeyW': moveForward.current = true; break;
+        case 'KeyA': moveLeft.current = true; break;
+        case 'KeyS': moveBackward.current = true; break;
+        case 'KeyD': moveRight.current = true; break;
+        case 'ShiftLeft': case 'ShiftRight': sprint.current = true; break;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      switch (e.code) {
+        case 'KeyW': moveForward.current = false; break;
+        case 'KeyA': moveLeft.current = false; break;
+        case 'KeyS': moveBackward.current = false; break;
+        case 'KeyD': moveRight.current = false; break;
+        case 'ShiftLeft': case 'ShiftRight': sprint.current = false; break;
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      moveForward.current = false;
+      moveBackward.current = false;
+      moveLeft.current = false;
+      moveRight.current = false;
+      sprint.current = false;
+    };
+  }, [active]);
+
+  useFrame((state, delta) => {
+    if (!active) return;
+    // Cap delta to prevent huge jumps if tab was inactive
+    const dt = Math.min(delta, 0.1);
+    const speed = sprint.current ? 6.0 : 2.5;
+    
+    const z = Number(moveForward.current) - Number(moveBackward.current);
+    const x = Number(moveRight.current) - Number(moveLeft.current);
+
+    direction.current.set(x, 0, z);
+    if (direction.current.lengthSq() > 0) {
+      direction.current.normalize();
+    }
+
+    // Get camera's forward direction on the XZ plane
+    const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    camForward.y = 0;
+    if (camForward.lengthSq() > 0) camForward.normalize();
+
+    // Get camera's right direction on the XZ plane
+    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    camRight.y = 0;
+    if (camRight.lengthSq() > 0) camRight.normalize();
+
+    // Calculate actual movement vector
+    const moveVec = new THREE.Vector3();
+    moveVec.addScaledVector(camForward, direction.current.z);
+    moveVec.addScaledVector(camRight, direction.current.x);
+
+    if (moveVec.lengthSq() > 0) {
+      moveVec.normalize();
+    }
+
+    const moveZ = moveVec.z * speed * dt;
+    const moveX = moveVec.x * speed * dt;
+
+    const oldX = camera.position.x;
+    const oldZ = camera.position.z;
+
+    camera.position.x += moveX;
+    camera.position.z += moveZ;
+
+    // Collision check
+    const doors = useDoors.getState().doors;
+    if (!isInBounds(camera.position.x, camera.position.z, doors)) {
+      camera.position.x = oldX;
+      camera.position.z = oldZ;
+    }
+
+    camera.position.y = EYE_LEVEL;
+
+    // Force R3F raycaster to the center of the screen in first-person mode
+    // so hover and click interactions fire exactly where the player is looking
+    state.pointer.set(0, 0);
+
+    // Room detection
+    let found = null;
+    const cx = camera.position.x;
+    const cz = camera.position.z;
+    for (const r of ROOM_VOLUMES) {
+      if (cx > r.x && cx < r.x + r.w && cz > r.z && cz < r.z + r.d) {
+        found = r.name;
+        break;
+      }
+    }
+    onLocationChange(found);
+  });
+
+  return active ? <PointerLockControls /> : null;
+};
+
 const RoomLight: React.FC<{ x: number; z: number; on: boolean }> = ({ x, z, on }) => {
   const ref = useRef<THREE.PointLight>(null);
-  // Eased so a light switching does not pop; motion here means state change.
   useFrame((_, dt) => {
     const l = ref.current;
     if (!l) return;
-    const target = on ? 7.5 : 0;
+    const target = on ? 8.0 : 0;
     if (Math.abs(l.intensity - target) > 0.01) {
       l.intensity = THREE.MathUtils.damp(l.intensity, target, 6, dt);
     }
   });
-  return (
-    <pointLight
-      ref={ref}
-      position={[x, CEILING_H - 0.75, z]}
-      color="#ffc98a"
-      intensity={0}
-      distance={7.5}
-      decay={2}
-    />
-  );
+  return <pointLight ref={ref} position={[x, CEILING_H - 0.75, z]} color="#ffc98a" intensity={0} distance={10} decay={2} />;
 };
 
-/** Invisible click volume + selection outline for one room. */
 const RoomZone: React.FC<{
-  id: string;
-  name: string;
-  x: number;
-  z: number;
-  w: number;
-  d: number;
-  selected: boolean;
-  lit: boolean;
-  controllable: boolean;
+  id: string; name: string; x: number; z: number; w: number; d: number;
+  selected: boolean; lit: boolean; controllable: boolean;
   onSelect: (id: string) => void;
 }> = ({ id, name, x, z, w, d, selected, lit, controllable, onSelect }) => {
   const [hover, setHover] = useState(false);
   const cx = x + w / 2;
   const cz = z + d / 2;
 
-  const ring = useMemo(() => {
-    const g = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(x + 0.05, 0.02, z + 0.05),
-      new THREE.Vector3(x + w - 0.05, 0.02, z + 0.05),
-      new THREE.Vector3(x + w - 0.05, 0.02, z + d - 0.05),
-      new THREE.Vector3(x + 0.05, 0.02, z + d - 0.05),
-      new THREE.Vector3(x + 0.05, 0.02, z + 0.05),
-    ]);
-    return g;
-  }, [x, z, w, d]);
-
   return (
     <group>
-      {/* Hit volume. Invisible but pickable, kept below head height so it
-          never swallows clicks meant for the camera controls. */}
       <mesh
         position={[cx, 0.9, cz]}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (controllable) onSelect(id);
-        }}
-        onPointerOver={(e) => {
-          e.stopPropagation();
-          if (controllable) setHover(true);
-        }}
-        onPointerOut={() => setHover(false)}
+        onClick={(e) => { e.stopPropagation(); if (controllable) onSelect(id); }}
+        onPointerOver={(e) => { e.stopPropagation(); if (controllable) { setHover(true); document.body.style.cursor = 'pointer'; } }}
+        onPointerOut={() => { setHover(false); document.body.style.cursor = 'auto'; }}
         visible={false}
       >
         <boxGeometry args={[w, 1.8, d]} />
       </mesh>
-
-      {/* Warm pool on the floor when the physical LED is on. */}
       {lit && (
-        <mesh position={[cx, 0.014, cz]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[cx, 0.06, cz]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[w - 0.1, d - 0.1]} />
-          <meshBasicMaterial color={CAD.accent} transparent opacity={0.13} depthWrite={false} />
+          <meshBasicMaterial color="#ffc98a" transparent opacity={0.08} depthWrite={false} />
         </mesh>
       )}
-
-      {(selected || hover) && (
-        <lineLoop geometry={ring}>
-          <lineBasicMaterial color={selected ? '#3ddc97' : '#8fa3bb'} linewidth={2} transparent opacity={selected ? 0.95 : 0.5} />
-        </lineLoop>
+      {(selected) && (
+        <mesh position={[cx, 0.07, cz]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[w - 0.2, d - 0.2]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.15} wireframe />
+        </mesh>
       )}
-
-      {/* Label. Rooms with hardware get a state dot; the others are annotated
-          but never given a state they cannot measure. */}
-      <Html position={[cx, 3.55, cz]} center distanceFactor={17} zIndexRange={[10, 0]} pointerEvents="none">
-        <div
-          className={clsx(
-            'flex items-center gap-1.5 border px-2 py-1 text-[10px] font-semibold tracking-[0.1em] whitespace-nowrap uppercase backdrop-blur-sm select-none',
-            selected
-              ? 'border-ok/70 bg-surface/90 text-fg'
-              : 'border-line-strong/60 bg-surface/75 text-fg-muted',
-          )}
-        >
-          {controllable && (
-            <span
-              className={clsx('h-1.5 w-1.5 rounded-full', lit ? 'bg-active' : 'bg-idle')}
-              aria-hidden="true"
-            />
-          )}
-          {name}
-        </div>
-      </Html>
+      {(hover && !selected) && (
+        <mesh position={[cx, 0.07, cz]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[w - 0.2, d - 0.2]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.05} />
+        </mesh>
+      )}
+      {hover && controllable && (
+        <Html position={[cx, 0.1, cz]} center pointerEvents="none">
+          <div className="text-[10px] font-bold tracking-widest text-white/80 uppercase drop-shadow-md">
+            {name}
+          </div>
+        </Html>
+      )}
     </group>
   );
 };
 
-/**
- * Eases the camera target toward the selected room. Spatial continuity: the
- * view follows the selection instead of teleporting.
- */
-const CameraFocus: React.FC<{ target: THREE.Vector3; controls: React.RefObject<any> }> = ({ target, controls }) => {
-  useFrame((_, dt) => {
-    const c = controls.current;
-    if (!c) return;
-    if (c.target.distanceToSquared(target) > 0.0004) {
-      c.target.lerp(target, 1 - Math.exp(-4 * dt));
-      c.update();
-    }
-  });
-  return null;
-};
-
-/** Keeps rendering on demand while anything is still easing. */
-const Invalidator: React.FC<{ deps: unknown }> = ({ deps }) => {
-  const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => {
-    // Pump frames for a moment so damped lights and camera settle.
-    let raf = 0;
-    const until = performance.now() + 1400;
-    const tick = () => {
-      invalidate();
-      if (performance.now() < until) raf = requestAnimationFrame(tick);
-    };
-    tick();
-    return () => cancelAnimationFrame(raf);
-  }, [deps, invalidate]);
-  return null;
-};
-
-const Scene: React.FC<HouseScene3DProps> = ({
-  devices,
-  selectedRoomId,
-  onSelectRoom,
-  garageOccupied,
-  garageOnline,
-}) => {
-  const controls = useRef<any>(null);
+export const HouseScene3D: React.FC<{
+  devices: Device[];
+  selectedRoomId: string | null;
+  onSelectRoom: (roomId: string) => void;
+  globalMode: 'NORMAL' | 'NIGHT' | 'ENTERTAINMENT' | 'SECURITY';
+  ambientLightBand: string | null;
+}> = ({ devices, selectedRoomId, onSelectRoom, globalMode, ambientLightBand }) => {
+  const [fpMode, setFpMode] = useState(false);
+  const [currentLoc, setCurrentLoc] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const { toggle } = useDevices();
 
   const litRooms = useMemo(() => {
     const s = new Set<string>();
-    devices.forEach((d) => {
-      if (d.state === 'ON') s.add(d.id);
-    });
+    devices.forEach((d) => { if (d.state === 'ON') s.add(d.id); });
     return s;
   }, [devices]);
 
-  /**
-   * Selection biases the view toward the room rather than centring on it.
-   * Fully recentring on a 5m room while zoomed out to see an 19m building
-   * throws the rest of the plan off-frame; a partial lean reads as "the view
-   * followed me" while keeping the whole twin composed.
-   */
-  const focus = useMemo(() => {
-    const centre = new THREE.Vector3(9.45, 1.0, 4.5);
-    const r = ROOM_VOLUMES.find((v) => v.id === selectedRoomId);
-    if (!r) return centre;
-    const room = new THREE.Vector3(r.x + r.w / 2, 1.0, r.z + r.d / 2);
-    return centre.lerp(room, 0.38);
-  }, [selectedRoomId]);
+  useEffect(() => {
+    const onChange = () => setIsLocked(!!document.pointerLockElement);
+    document.addEventListener('pointerlockchange', onChange);
+    return () => document.removeEventListener('pointerlockchange', onChange);
+  }, []);
+
+  const handleLocChange = useCallback((loc: string | null) => {
+    setCurrentLoc((prev) => (prev !== loc ? loc : prev));
+  }, []);
 
   return (
-    <>
-      {/* Daylight: a low warm key through the glazed wall plus soft fill, so
-          the white massing reads with real depth rather than flat shading. */}
-      <hemisphereLight args={['#e6edf7', '#59606b', 1.0]} />
-      {/* Sun. Casts the shadows that give the white massing its depth; the
-          frustum is sized to the 19 x 9 footprint so the map stays sharp. */}
-      <directionalLight
-        position={[-14, 20, -10]}
-        intensity={1.7}
-        color="#fff4e2"
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-16}
-        shadow-camera-right={16}
-        shadow-camera-top={16}
-        shadow-camera-bottom={-16}
-        shadow-camera-near={1}
-        shadow-camera-far={60}
-        shadow-bias={-0.0006}
-        shadow-normalBias={0.02}
-      />
-      <directionalLight position={[18, 9, 16]} intensity={0.38} color="#cfe0f5" />
+    <div className="relative w-full h-full">
+      <div className="absolute bottom-6 left-6 z-10 flex gap-2">
+        <button 
+          className={clsx("px-3 py-1.5 text-xs font-semibold rounded backdrop-blur-md border transition-colors", !fpMode ? "bg-white text-black border-white" : "bg-black/50 text-white border-white/20 hover:bg-black/80")}
+          onClick={() => {
+            setFpMode(false);
+            if (document.pointerLockElement) document.exitPointerLock();
+          }}
+        >
+          Overview
+        </button>
+        <button 
+          className={clsx("px-3 py-1.5 text-xs font-semibold rounded backdrop-blur-md border transition-colors", fpMode ? "bg-white text-black border-white" : "bg-black/50 text-white border-white/20 hover:bg-black/80")}
+          onClick={() => setFpMode(true)}
+        >
+          Walkthrough
+        </button>
+      </div>
 
-      <GhostingGroup>
-        <Interior />
-      </GhostingGroup>
+      {fpMode && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 pointer-events-none">
+          {currentLoc && (
+            <div className="bg-black/60 border border-white/10 text-white/90 text-[10px] font-bold tracking-[0.2em] px-4 py-1.5 rounded-full backdrop-blur uppercase">
+              CURRENT ROOM: {currentLoc}
+            </div>
+          )}
+          <div className="bg-black/60 border border-white/10 text-white/70 text-xs px-4 py-2 rounded-full backdrop-blur">
+            {isLocked ? (
+              <span className="text-emerald-400 font-medium">MOUSE LOOK ACTIVE (ESC to release)</span>
+            ) : (
+              <span>Click canvas to look • WASD to move</span>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* Pendants: one per controllable room, emissive when the LED is on. */}
-      {ROOM_VOLUMES.filter((r) => r.controllable).map((r) => (
-        <Pendant key={`pd-${r.id}`} p={r.light} ceiling={CEILING_H} on={litRooms.has(r.id)} />
-      ))}
+      {fpMode && isLocked && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-white/80 rounded-full z-20 mix-blend-difference pointer-events-none" />
+      )}
 
-      {ROOM_VOLUMES.filter((r) => r.controllable).map((r) => (
-        <RoomLight key={`rl-${r.id}`} x={r.light[0]} z={r.light[1]} on={litRooms.has(r.id)} />
-      ))}
-
-      {ROOM_VOLUMES.map((r) => (
-        <RoomZone
-          key={`rz-${r.id}`}
-          id={r.id}
-          name={r.name}
-          x={r.x}
-          z={r.z}
-          w={r.w}
-          d={r.d}
-          selected={selectedRoomId === r.id}
-          lit={litRooms.has(r.id)}
-          controllable={r.controllable}
-          onSelect={onSelectRoom}
+      <Canvas shadows frameloop="always" dpr={[1, 2]} gl={{ antialias: true }} 
+        camera={fpMode ? { position: [3.5, EYE_LEVEL, 3.0], fov: 60 } : { position: [6, 12, 18], fov: 45 }}>
+        
+        <hemisphereLight 
+          args={[
+            globalMode === 'NIGHT' || ambientLightBand === 'dark' ? '#0a0a1a' : globalMode === 'SECURITY' ? '#1a0505' : '#ffffff', 
+            globalMode === 'NIGHT' || ambientLightBand === 'dark' ? '#05050a' : '#444444', 
+            globalMode === 'NIGHT' ? 0.1 : globalMode === 'ENTERTAINMENT' ? 0.2 : ambientLightBand === 'dark' ? 0.15 : ambientLightBand === 'dim' ? 0.3 : 0.6
+          ]} 
         />
-      ))}
+        <directionalLight 
+          position={[10, 20, 10]} 
+          intensity={
+            globalMode === 'NIGHT' ? 0.05 : 
+            globalMode === 'ENTERTAINMENT' ? 0.3 : 
+            ambientLightBand === 'dark' ? 0.1 : 
+            ambientLightBand === 'dim' ? 0.4 : 
+            ambientLightBand === 'bright' ? 1.5 : 
+            1.2
+          } 
+          color={globalMode === 'SECURITY' ? '#ff3333' : globalMode === 'ENTERTAINMENT' ? '#9933ff' : '#ffffff'}
+          castShadow 
+          shadow-mapSize={[2048, 2048]} 
+        />
 
-      {/* A vehicle is drawn only when the ultrasonic actually reports one. */}
-      {garageOnline && garageOccupied && <Car p={[15.6, 3.9]} />}
+        <Architecture />
+        <AllFurniture />
 
-      <OrbitControls
-        ref={controls}
-        makeDefault
-        enablePan={false}
-        minDistance={13}
-        maxDistance={42}
-        minPolarAngle={0.25}
-        maxPolarAngle={Math.PI / 2.35}
-        enableDamping
-        dampingFactor={0.08}
-        target={[9.45, 1, 4.5]}
-      />
-      <CameraFocus target={focus} controls={controls} />
-      <Invalidator deps={`${selectedRoomId}|${[...litRooms].sort().join()}|${garageOccupied}`} />
-    </>
+        {ROOM_VOLUMES.filter((r) => r.controllable).map((r) => (
+          <Pendant key={`pd-${r.id}`} p={r.light} ceiling={CEILING_H} on={litRooms.has(r.id)} 
+            onClick={() => toggle(r.id)} />
+        ))}
+
+        {ROOM_VOLUMES.filter((r) => r.controllable).map((r) => (
+          <RoomLight key={`rl-${r.id}`} x={r.light[0]} z={r.light[1]} on={litRooms.has(r.id)} />
+        ))}
+
+        {ROOM_VOLUMES.map((r) => (
+          <RoomZone key={`rz-${r.id}`} {...r} selected={selectedRoomId === r.id} lit={litRooms.has(r.id)} onSelect={onSelectRoom} />
+        ))}
+
+        {!fpMode && <OrbitControls makeDefault minDistance={5} maxDistance={30} maxPolarAngle={Math.PI / 2.1} target={[6, 0, 6]} />}
+        <FirstPersonCamera active={fpMode} onLocationChange={handleLocChange} />
+      </Canvas>
+    </div>
   );
 };
-
-export const HouseScene3D = React.memo(function HouseScene3D(props: HouseScene3DProps) {
-  return (
-    <Canvas
-      // Render on demand: a dashboard polling at 1 Hz must not spin the GPU.
-      // OrbitControls and the Invalidator request frames when needed.
-      shadows
-      frameloop="demand"
-      dpr={[1, 2]}
-      gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-      camera={{ position: [-7.5, 16.5, 24], fov: 34, near: 0.1, far: 250 }}
-      style={{ touchAction: 'none' }}
-      aria-label="Interactive 3D digital twin of the house. Click a room to select it."
-    >
-      <Scene {...props} />
-    </Canvas>
-  );
-});
