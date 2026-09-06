@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { HouseScene3D } from '../components/house3d/HouseScene3D';
 
@@ -8,9 +8,64 @@ import { useHttpChannel, useGarage, useAmbientLight, useSensors } from '../hooks
 import { useRoomAutomation } from '../hooks/useRoomAutomation';
 import { roomById } from '../config/rooms';
 import { esp32WS } from '../services/esp32WebSocket';
+import type { WSMessage } from '../services/esp32WebSocket';
 import { useGestures } from '../hooks/useGestures';
 import type { GestureCommand, GestureSpatialZone } from '../hooks/useGestures';
 import { Settings, X, Moon, Sun, MonitorPlay, Shield } from 'lucide-react';
+
+const UltrasonicViz = ({ enabled }: { enabled: boolean }) => {
+  const [displayDist, setDisplayDist] = useState<number | null>(null);
+  const lastValidTime = useRef<number>(0);
+  const lastValidDist = useRef<number | null>(null);
+  const rawDist = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const unsub = esp32WS.onMessage((msg: WSMessage) => {
+      if (msg.distanceValid && msg.distance !== undefined) {
+        lastValidTime.current = Date.now();
+        lastValidDist.current = msg.distance;
+        rawDist.current = msg.distance;
+      } else {
+        rawDist.current = null;
+      }
+    });
+
+    const intervalId = setInterval(() => {
+      const now = Date.now();
+      // Hysteresis: wait 400ms before declaring it missing visually
+      if (rawDist.current === null && (now - lastValidTime.current > 400)) {
+        setDisplayDist(null);
+      } else if (lastValidTime.current > 0) {
+        setDisplayDist(lastValidDist.current);
+      }
+    }, 100);
+
+    return () => { 
+      unsub();
+      clearInterval(intervalId);
+    };
+  }, [enabled]);
+
+  if (!enabled) return null;
+
+  return (
+    <div className="bg-black/60 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg flex flex-col items-center shadow-lg transition-opacity duration-300 w-28">
+      <span className="text-[9px] font-bold tracking-widest text-white/50 mb-1">HC-SR04</span>
+      {displayDist !== null && displayDist <= 30 ? (
+        <>
+          <span className="text-xs text-emerald-400 font-semibold mb-0.5 animate-pulse">Detecting</span>
+          <span className="text-[10px] text-white/80 font-mono">{displayDist.toFixed(1)} cm</span>
+        </>
+      ) : (
+        <>
+          <span className="text-[10px] text-white/40 mt-1 mb-1 animate-pulse">Searching...</span>
+          <span className="text-[10px] text-transparent">0 cm</span>
+        </>
+      )}
+    </div>
+  );
+};
 
 export const Dashboard = () => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
@@ -84,7 +139,6 @@ export const Dashboard = () => {
             }}
             globalMode={globalMode}
             ambientLightBand={ambientLight.band}
-            gesturesEnabled={gestures.state.enabled}
           />
         </div>
 
@@ -159,6 +213,11 @@ export const Dashboard = () => {
             </div>
           </div>
         )}
+
+        {/* HC-SR04 HUD - Fixed outside of Canvas */}
+        <div className="absolute bottom-20 right-6 z-10 pointer-events-none">
+          <UltrasonicViz enabled={gestures.state.enabled} />
+        </div>
 
         {/* Subtle Motion Indicator Overlay */}
         {sensors.reading?.motion && (
