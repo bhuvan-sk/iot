@@ -163,3 +163,64 @@ export const FURNITURE: Solid[] = [
   { x: 11.1, y: 5.86, w: 0.42, d: 0.58, h: 0.42, color: WHITE, room: BATH },
   { x: 10.88, y: 7.3, w: 0.06, d: 1.4, h: 1.35, color: '#cfe2e8', opacity: 0.4, room: BATH },
 ];
+
+// ---------------------------------------------------------------- Garage ---
+//
+// The garage wing uses exactly the same box vocabulary and section-cut height
+// as the house, so it reads as one continuous building rather than a widget
+// bolted onto the side.
+
+const GARAGE_WALL = '#d3cec6';
+const CAR_BODY = '#586274';
+const CAR_GLASS = '#39414f';
+const TYRE = '#23262b';
+const SENSOR_BODY = '#2f353d';
+
+/** Extends the plinth under the garage wing. */
+export const GARAGE_SLAB: Box = { x: 12.0, y: 2.15, w: 7.15, d: 7.1, h: 0.4, z: -0.4 };
+
+export const GARAGE_WALLS: Solid[] = [
+  // Far wall (small y) - full height, continues the house backdrop line.
+  { x: 12.3, y: 2.1, w: 6.6, d: 0.3, h: WALL_TALL_H, color: GARAGE_WALL },
+  // Outer wall (max x) is the door side: cut low so both bays stay visible.
+  { x: 18.9, y: 2.1, w: 0.3, d: 7.2, h: WALL_CUT_H, color: GARAGE_WALL },
+  // Near wall (max y), cut at section height like the rest of the model.
+  { x: 12.3, y: 9.0, w: 6.9, d: 0.3, h: WALL_CUT_H, color: GARAGE_WALL },
+  // Kerb between the two bays - a low divider, not a full wall.
+  { x: 12.65, y: 5.63, w: 5.9, d: 0.12, h: 0.14, color: '#7c828b' },
+];
+
+/** Painted bay outlines, drawn flat on the garage floor. */
+export const GARAGE_BAY_MARKINGS = [
+  { x: 12.65, y: 2.75, w: 5.9, d: 2.8 },
+  { x: 12.65, y: 5.85, w: 5.9, d: 2.8 },
+];
+
+/**
+ * A car, expressed in the same box language as the furniture.
+ * Built at a bay origin so both bays can reuse it.
+ */
+export function carSolids(bayX: number, bayY: number): Solid[] {
+  return [
+    // lower body
+    { x: bayX + 0.5, y: bayY + 0.55, w: 4.3, d: 1.75, h: 0.5, z: 0.18, color: CAR_BODY },
+    // cabin, inset and set back
+    { x: bayX + 1.45, y: bayY + 0.7, w: 2.0, d: 1.45, h: 0.42, z: 0.68, color: CAR_GLASS },
+    // wheels
+    { x: bayX + 1.0, y: bayY + 0.42, w: 0.72, d: 0.22, h: 0.36, color: TYRE },
+    { x: bayX + 3.45, y: bayY + 0.42, w: 0.72, d: 0.22, h: 0.36, color: TYRE },
+    { x: bayX + 1.0, y: bayY + 1.96, w: 0.72, d: 0.22, h: 0.36, color: TYRE },
+    { x: bayX + 3.45, y: bayY + 1.96, w: 0.72, d: 0.22, h: 0.36, color: TYRE },
+  ];
+}
+
+/** The HC-SR04 housing on the inner wall of bay 1. */
+export const GARAGE_SENSOR: Solid = {
+  x: 12.34,
+  y: 3.85,
+  w: 0.16,
+  d: 0.42,
+  h: 0.2,
+  z: 0.8,
+  color: SENSOR_BODY,
+};

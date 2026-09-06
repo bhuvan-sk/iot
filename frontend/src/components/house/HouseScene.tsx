@@ -1,7 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import type { Device } from '../../types';
-import { ROOMS, BATHROOM } from '../../config/rooms';
-import { BASE_SLAB, WALLS, WINDOWS, RUGS, FURNITURE } from './houseModel';
+import { ROOMS, BATHROOM, GARAGE, GARAGE_BAYS } from '../../config/rooms';
+import {
+  BASE_SLAB,
+  WALLS,
+  WINDOWS,
+  RUGS,
+  FURNITURE,
+  GARAGE_SLAB,
+  GARAGE_WALLS,
+  GARAGE_BAY_MARKINGS,
+  GARAGE_SENSOR,
+  carSolids,
+} from './houseModel';
 import type { Solid } from './houseModel';
 import { boxFaces, slab, faceX, faceY, project, depthKey, shade, mix } from './isometric';
 
@@ -9,6 +20,10 @@ interface HouseSceneProps {
   devices: Device[];
   selectedRoomId: string | null;
   onSelectRoom: (roomId: string) => void;
+  /** Derived boolean, not a live distance - keeps the scene off the 1 Hz path. */
+  garageOccupied: boolean;
+  /** False when the ultrasonic channel is down; the bay then reads unknown. */
+  garageOnline: boolean;
 }
 
 /** Warm interior light. Kept low so it reads as architectural, not neon. */
@@ -31,7 +46,13 @@ const BoxSolid: React.FC<{ solid: Solid; lit: boolean }> = ({ solid, lit }) => {
   );
 };
 
-export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId, onSelectRoom }) => {
+const HouseSceneImpl: React.FC<HouseSceneProps> = ({
+  devices,
+  selectedRoomId,
+  onSelectRoom,
+  garageOccupied,
+  garageOnline,
+}) => {
   const [hovered, setHovered] = useState<string | null>(null);
 
   const litRooms = useMemo(() => {
@@ -50,13 +71,13 @@ export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId,
     [],
   );
 
-  const [shadowX, shadowY] = project(6, 4.5, -0.4);
+  const [shadowX, shadowY] = project(9.4, 4.6, -0.4);
   const slabFaces = boxFaces(BASE_SLAB);
 
   return (
     <svg
-      viewBox="-272 -96 616 452"
-      className="w-full h-auto select-none"
+      viewBox="-274 -100 716 542"
+      className="h-full w-full select-none"
       role="img"
       aria-label="Isometric plan of the house with light controls for each room"
     >
@@ -77,12 +98,35 @@ export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId,
       </defs>
 
       {/* Contact shadow so the model sits on the dark canvas */}
-      <ellipse cx={shadowX} cy={shadowY + 20} rx={300} ry={146} fill="url(#groundShadow)" />
+      <ellipse cx={shadowX} cy={shadowY + 24} rx={412} ry={186} fill="url(#groundShadow)" />
 
       {/* Plinth */}
       <polygon points={slabFaces.left} fill="#151b26" />
       <polygon points={slabFaces.right} fill="#1b2230" />
       <polygon points={slabFaces.top} fill="#2b3444" />
+
+      {/* Garage plinth - same slab treatment, so the wing reads as one building */}
+      <polygon points={boxFaces(GARAGE_SLAB).left} fill="#151b26" />
+      <polygon points={boxFaces(GARAGE_SLAB).right} fill="#1b2230" />
+      <polygon points={boxFaces(GARAGE_SLAB).top} fill="#2b3444" />
+
+      {/* Garage floor + painted bay markings */}
+      <polygon
+        points={slab(GARAGE.x, GARAGE.y, GARAGE.w, GARAGE.d)}
+        fill={GARAGE.floor}
+        stroke={shade(GARAGE.floor, -0.22)}
+        strokeWidth={0.7}
+      />
+      {GARAGE_BAY_MARKINGS.map((bay, i) => (
+        <polygon
+          key={`bay-${i}`}
+          points={slab(bay.x, bay.y, bay.w, bay.d, 0.01)}
+          fill="none"
+          stroke={shade(GARAGE.floor, -0.3)}
+          strokeWidth={1.1}
+          strokeDasharray="5 4"
+        />
+      ))}
 
       {/* Room floors, tinted warm when the room light is on */}
       {[...ROOMS.map((r) => ({ ...r.plan, floor: r.floor, id: r.id })), { ...BATHROOM, id: 'bath', floor: BATHROOM.floor }].map(
@@ -161,6 +205,29 @@ export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId,
         <BoxSolid key={`solid-${i}`} solid={s} lit={s.room ? litRooms.has(s.room) : false} />
       ))}
 
+      {/* Garage structure, sensor and (only when actually detected) a vehicle */}
+      {[...GARAGE_WALLS, GARAGE_SENSOR, ...(garageOccupied ? carSolids(GARAGE_BAYS[0].x, GARAGE_BAYS[0].y) : [])]
+        .sort((a, b) => depthKey(a) - depthKey(b))
+        .map((solid, i) => (
+          <BoxSolid key={`garage-${i}`} solid={solid} lit={false} />
+        ))}
+
+      {/* Measurement ray from the sensor across the monitored bay. Present only
+          while the ultrasonic channel is actually reporting. */}
+      {garageOnline && (
+        <line
+          x1={project(12.5, 4.06, 0.88)[0]}
+          y1={project(12.5, 4.06, 0.88)[1]}
+          x2={project(garageOccupied ? 13.6 : 18.6, 4.06, 0.88)[0]}
+          y2={project(garageOccupied ? 13.6 : 18.6, 4.06, 0.88)[1]}
+          stroke={garageOccupied ? '#f5b544' : '#5b6b80'}
+          strokeWidth={garageOccupied ? 1.5 : 1}
+          strokeDasharray="3 3"
+          opacity={0.85}
+          pointerEvents="none"
+        />
+      )}
+
       {/* Selection and hover outlines sit above the model */}
       {ROOMS.map((r) => {
         const isSelected = selectedRoomId === r.id;
@@ -193,6 +260,41 @@ export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId,
             pointerEvents="none"
           >
             BATH
+          </text>
+        );
+      })()}
+
+      {/* Garage bay labels. Only bay 1 has a sensor, so only bay 1 gets a
+          state - bay 2 is explicitly marked unmonitored rather than guessed. */}
+      {GARAGE_BAYS.map((bay) => {
+        const [bx, by] = project(bay.x + bay.w / 2, bay.y + bay.d / 2, 0);
+        const label = `BAY ${bay.id}`;
+        const state = !bay.sensed
+          ? 'NOT MONITORED'
+          : !garageOnline
+            ? 'NO SIGNAL'
+            : garageOccupied
+              ? 'OCCUPIED'
+              : 'CLEAR';
+        const tone = !bay.sensed ? '#64748b' : garageOnline ? (garageOccupied ? '#f5b544' : '#7d94ad') : '#64748b';
+        return (
+          <g key={`baylabel-${bay.id}`} pointerEvents="none">
+            <text x={bx} y={by - 4} textAnchor="middle" fontSize={9} fill="#94a3b8" letterSpacing="0.1em">
+              {label}
+            </text>
+            <text x={bx} y={by + 8} textAnchor="middle" fontSize={8} fill={tone} letterSpacing="0.08em" fontWeight={600}>
+              {state}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Garage zone caption */}
+      {(() => {
+        const [gx, gy] = project(GARAGE.x + GARAGE.w / 2, GARAGE.y - 0.5, 0);
+        return (
+          <text x={gx} y={gy} textAnchor="middle" fontSize={9} fill="#64748b" letterSpacing="0.14em" pointerEvents="none">
+            GARAGE
           </text>
         );
       })()}
@@ -263,3 +365,9 @@ export const HouseScene: React.FC<HouseSceneProps> = ({ devices, selectedRoomId,
     </svg>
   );
 };
+
+/**
+ * Memoised: the scene only re-renders when the light states, the selection or
+ * the garage booleans change - never on the 1 Hz sensor poll.
+ */
+export const HouseScene = React.memo(HouseSceneImpl);

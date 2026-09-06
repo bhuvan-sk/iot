@@ -4,6 +4,11 @@ export interface WSMessage {
   time?: string;
   temperature?: number;
   humidity?: number;
+  /**
+   * Motion, from field 2 of the v2 CSV frame. Undefined when the board is
+   * running firmware that does not send it - which is not the same as false.
+   */
+  motion?: boolean;
 }
 
 type StateCallback = (state: WSConnectionState) => void;
@@ -50,10 +55,24 @@ class ESP32WebSocketService {
       
       this.ws.onmessage = (event) => {
         try {
-          // Check for ESP32 CSV format "temperature,humidity"
+          /*
+           * ESP32 CSV frame. v1 was "temperature,humidity"; v2 appends motion
+           * as "temperature,humidity,motion" and may send "nan" for either
+           * reading when the DHT has not yet produced a good one. Fields 0 and
+           * 1 are unchanged, so both generations parse here.
+           *
+           * A non-finite reading is dropped rather than passed on as NaN - the
+           * field is simply absent, which is what "we do not know" looks like
+           * everywhere else in this codebase.
+           */
           if (typeof event.data === 'string' && event.data.includes(',')) {
-            const [tempStr, humStr] = event.data.split(',');
-            const data = { temperature: parseFloat(tempStr), humidity: parseFloat(humStr) };
+            const [tempStr, humStr, motionStr] = event.data.split(',');
+            const temperature = parseFloat(tempStr);
+            const humidity = parseFloat(humStr);
+            const data: Omit<WSMessage, 'time'> = {};
+            if (Number.isFinite(temperature)) data.temperature = temperature;
+            if (Number.isFinite(humidity)) data.humidity = humidity;
+            if (motionStr !== undefined) data.motion = motionStr.trim() === '1';
             console.log('[ESP32] Sensor data received (CSV)', data);
             this.notifyMessage(data);
           } else {

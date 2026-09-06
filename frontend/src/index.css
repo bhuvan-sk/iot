@@ -1,15 +1,130 @@
 @import "tailwindcss";
 
+/* Plus Jakarta Sans, recommended by the design system for smart-home control
+   surfaces. display=swap plus a real system fallback stack, so the dashboard
+   still renders correctly on a LAN with no internet access. */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
 @theme {
-  --color-primary: #10b981;
-  --color-background: #0f172a;
-  --color-card: #1e293b;
-  --color-text: #f8fafc;
+  /* ---- Surfaces -------------------------------------------------------
+     A tight neutral ladder. Depth comes from these four steps and from
+     1px borders, not from shadows or blur. */
+  --color-surface: #0a0e15;
+  --color-panel: #10161f;
+  --color-panel-raised: #151d29;
+  --color-line: #1d2532;
+  --color-line-strong: #2b3644;
+
+  /* ---- Text ---------------------------------------------------------- */
+  --color-fg: #e9eef6;
+  --color-fg-muted: #8a99ad;
+  --color-fg-dim: #5a6779;
+
+  /* ---- Semantic state -------------------------------------------------
+     The only saturated colours in the system. Each one means exactly one
+     thing, and every use is paired with an icon or text label so colour is
+     never the sole carrier of meaning. */
+  --color-ok: #3ddc97;        /* online, healthy */
+  --color-active: #f2b13d;    /* a light that is physically ON */
+  --color-warn: #e8a33d;      /* degraded, stale */
+  --color-danger: #f0716f;    /* error, failed command */
+  --color-idle: #5f6b7d;      /* off, unmonitored, unavailable */
+  --color-info: #6aa9d8;      /* humidity, passive telemetry */
+
+  /* ---- Type ------------------------------------------------------------
+     Dense dashboard scale. Numeric readouts use tabular figures so a value
+     changing at 1 Hz never shifts the layout around it. */
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono',
+    Menlo, Consolas, monospace;
+
+  --text-micro: 0.625rem;   /* 10px - eyebrow labels only */
+  --text-label: 0.6875rem;  /* 11px - field labels */
+  --text-xs: 0.75rem;       /* 12px */
+  --text-sm: 0.8125rem;     /* 13px - body default in a dense console */
+  --text-base: 0.875rem;    /* 14px */
+  --text-lg: 1rem;
+  --text-metric: 1.75rem;   /* 28px - primary readouts */
+  --text-metric-lg: 2.25rem;
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-text);
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  background-color: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* Eyebrow label: the repeated small-caps key used above every readout. */
+.eyebrow {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-fg-dim);
+}
+
+/* Numeric readout. Tabular figures keep 23.8 and 100.0 the same width. */
+.readout {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.02em;
+}
+
+/* One shared focus treatment, never removed. */
+:where(button, [role='button'], a, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-ok);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Motion is subtle by design and disappears entirely when asked. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Live-pulse for the connection dot. Communicates "receiving", nothing else. */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-dot {
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+/* Threshold sliders draw their own handle and live-reading marker, so the
+   native thumb is made invisible while staying draggable and focusable. */
+.range-bare::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+}
+.range-bare:active::-webkit-slider-thumb { cursor: grabbing; }
+.range-bare::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+}
+.range-bare::-webkit-slider-runnable-track,
+.range-bare::-moz-range-track { background: transparent; }

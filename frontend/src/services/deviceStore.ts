@@ -26,6 +26,8 @@ class DeviceStore {
   private listeners: Set<DevicesCallback> = new Set();
   private pollInterval: number | null = null;
   private started = false;
+  /** Last LED command failure, surfaced in the diagnostics panel. */
+  private lastError: string | null = null;
 
   private seedFromRooms(): Device[] {
     return ROOMS.map((room) => ({
@@ -75,30 +77,56 @@ class DeviceStore {
 
   public async toggle(id: string) {
     const device = this.devices.find((d) => d.id === id);
-    if (!device) return;
-    const next: 'ON' | 'OFF' = device.state === 'ON' ? 'OFF' : 'ON';
+    if (!device) return false;
+    return this.setDevice(id, device.state === 'ON' ? 'OFF' : 'ON');
+  }
+
+  /**
+   * Drives one light to an explicit state and reports whether the hardware
+   * confirmed it. Automatic lighting needs "make it ON" rather than "flip it",
+   * and it needs to know whether the command actually landed.
+   *
+   * Local state is only updated after the ESP32 answers, so a light is never
+   * shown as switched when the command failed.
+   */
+  public async setDevice(id: string, next: 'ON' | 'OFF'): Promise<boolean> {
+    const device = this.devices.find((d) => d.id === id);
+    if (!device) return false;
+    if (device.state === next) return true;
 
     if (this.useRealESP32) {
       const room = roomById(id);
       if (!room) {
         console.warn(`[ESP32] No hardware mapping for device ${id}`);
-        return;
+        return false;
       }
       try {
         await setLed(room.color, next === 'ON');
+        this.lastError = null;
         this.setState(id, next);
+        return true;
       } catch (error) {
-        console.error(`[ESP32] Failed to toggle ${device.name}`, error);
+        this.lastError = error instanceof Error ? error.message : 'LED request failed';
+        console.error(`[ESP32] Failed to switch ${device.name}`, error);
+        this.notify();
+        return false;
       }
-      return;
     }
 
     try {
       const updated = await toggleDeviceApi(id);
       this.setState(id, updated.state);
+      return true;
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Toggle failed';
       console.error('Failed to toggle device', error);
+      this.notify();
+      return false;
     }
+  }
+
+  public getLastError() {
+    return this.lastError;
   }
 
   private setState(id: string, state: 'ON' | 'OFF') {
