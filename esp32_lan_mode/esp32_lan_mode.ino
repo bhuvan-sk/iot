@@ -548,11 +548,13 @@ void loop() {
     lastDistanceCm = readDistanceCm();
 
     // High-frequency telemetry for gesture engine
-    String uPayload = "U,";
-    uPayload += (lastDistanceCm < 0) ? "0.0" : String(lastDistanceCm, 1);
-    uPayload += ",";
-    uPayload += (lastDistanceCm < 0) ? "0" : "1";
-    webSocket.broadcastTXT(uPayload);
+    char wsBuf[32];
+    if (lastDistanceCm < 0) {
+      snprintf(wsBuf, sizeof(wsBuf), "U,0.0,0");
+    } else {
+      snprintf(wsBuf, sizeof(wsBuf), "U,%.1f,1", lastDistanceCm);
+    }
+    webSocket.broadcastTXT(wsBuf);
   }
 
   // ---- LDR: sampled less often, also re-checks availability ----
