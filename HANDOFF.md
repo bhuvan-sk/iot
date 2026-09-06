@@ -46,27 +46,18 @@ iot/
 │   │   ├── services/ (esp32WebSocket.ts - parses CSV and manages connection)
 │   │   └── hooks/ (useESP32WebSocket.ts - exposes shared live state)
 │   ├── .env (Configures ESP32 IP and Real/Mock mode)
-│   └── package.json (Contains "build:esp32" script)
+│   └── package.json
 ├── backend/
 │   └── src/ (Express API for mock development)
-└── esp32_firmware/
-    ├── esp32_firmware.ino (ESPAsyncWebServer + WebSockets)
-    └── data/ (Contains the React production build for LittleFS upload)
+└── esp32_lan_mode/
+    └── esp32_lan_mode.ino (Headless ESP32 IoT firmware)
 ```
 
-## 🚀 Deployment Options
+## 🚀 Deployment
 
-### 1. Development Mode (Laptop Server)
 - Run `npm run dev` in the `frontend` folder.
 - Access via `http://localhost:5173`.
-- Communicates over LAN to the ESP32.
-
-### 2. Production Mode (Served directly from ESP32)
-The ESP32 is fully configured with `LittleFS` and `ESPAsyncWebServer` to serve the React UI itself.
-1. Run `npm run build:esp32` in the `frontend` folder to build and copy the production UI.
-2. In Arduino IDE, use **Tools > ESP32 Sketch Data Upload** to burn the `data/` folder to the ESP32.
-3. Upload `esp32_firmware.ino` to the ESP32.
-4. Open the ESP32's IP address (e.g., `http://192.168.1.50/`) in your browser to load the dashboard straight from the hardware.
+- Communicates over LAN to the ESP32 (running `esp32_lan_mode.ino`).
 
 ## ✅ Current Status
 - UI is highly polished and responsive.

@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:esp32": "npm run build && node scripts/copy-to-esp32.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },
