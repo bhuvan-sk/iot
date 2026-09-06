@@ -88,11 +88,12 @@ export const Dashboard = () => {
     if (cmd === 'ONE_WAVE' && zone) {
       let roomId = '';
       if (zone === 'BEDROOM') roomId = 'bedroom';
-      if (zone === 'LIVING_ROOM') roomId = 'living-room';
+      if (zone === 'LIVING_ROOM') roomId = 'living';
       if (zone === 'KITCHEN') roomId = 'kitchen';
       if (zone === 'GARAGE') roomId = 'garage';
 
       if (roomId) {
+        console.log(`[Gesture] 15cm ONE_WAVE logic fired: Zone ${zone} -> Room Key '${roomId}'`);
         toggle(roomId);
         const device = devicesRef.current.find(d => d.id === roomId);
         const willBeOn = device ? device.state !== 'ON' : true;
