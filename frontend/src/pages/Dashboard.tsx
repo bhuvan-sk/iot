@@ -52,7 +52,7 @@ const UltrasonicViz = ({ enabled }: { enabled: boolean }) => {
   return (
     <div className="bg-black/60 border border-white/20 backdrop-blur-md px-3 py-2 rounded-lg flex flex-col items-center shadow-lg transition-opacity duration-300 w-28">
       <span className="text-[9px] font-bold tracking-widest text-white/50 mb-1">HC-SR04</span>
-      {displayDist !== null && displayDist <= 30 ? (
+      {displayDist !== null && displayDist <= 40 ? (
         <>
           <span className="text-xs text-emerald-400 font-semibold mb-0.5 animate-pulse">Detecting</span>
           <span className="text-[10px] text-white/80 font-mono">{displayDist.toFixed(1)} cm</span>
@@ -90,6 +90,7 @@ export const Dashboard = () => {
       if (zone === 'BEDROOM') roomId = 'bedroom';
       if (zone === 'LIVING_ROOM') roomId = 'living-room';
       if (zone === 'KITCHEN') roomId = 'kitchen';
+      if (zone === 'GARAGE') roomId = 'garage';
 
       if (roomId) {
         toggle(roomId);

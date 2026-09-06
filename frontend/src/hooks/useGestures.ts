@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { esp32WS } from '../services/esp32WebSocket';
 
 export type GestureCommand = 'ONE_WAVE' | 'CANCEL';
-export type GestureSpatialZone = 'BEDROOM' | 'LIVING_ROOM' | 'KITCHEN' | null;
+export type GestureSpatialZone = 'BEDROOM' | 'LIVING_ROOM' | 'KITCHEN' | 'GARAGE' | null;
 
 export interface GestureState {
   enabled: boolean;
@@ -18,6 +18,7 @@ const GESTURE_CONFIG = {
   zoneBedroom: [5, 10],
   zoneLiving: [10.1, 20],
   zoneKitchen: [20.1, 30],
+  zoneGarage: [30.1, 40],
   // Timing
   hysteresisMs: 150, // Minimum time hand must be stable in a zone to count
   waveDurationMaxMs: 1200, // Maximum time hand can stay in zone for a wave
@@ -28,6 +29,7 @@ const determineZone = (d: number): GestureSpatialZone => {
   if (d >= GESTURE_CONFIG.zoneBedroom[0] && d <= GESTURE_CONFIG.zoneBedroom[1]) return 'BEDROOM';
   if (d >= GESTURE_CONFIG.zoneLiving[0] && d <= GESTURE_CONFIG.zoneLiving[1]) return 'LIVING_ROOM';
   if (d >= GESTURE_CONFIG.zoneKitchen[0] && d <= GESTURE_CONFIG.zoneKitchen[1]) return 'KITCHEN';
+  if (d >= GESTURE_CONFIG.zoneGarage[0] && d <= GESTURE_CONFIG.zoneGarage[1]) return 'GARAGE';
   return null;
 };
 
