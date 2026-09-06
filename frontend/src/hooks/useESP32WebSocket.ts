@@ -11,7 +11,9 @@ export const useESP32WebSocket = () => {
     esp32WS.connect();
     
     const unsubscribeState = esp32WS.onStateChange(setConnectionState);
-    const unsubscribeMsg = esp32WS.onMessage(setLatestMessage);
+    const unsubscribeMsg = esp32WS.onMessage((msg) => {
+      setLatestMessage(prev => prev ? { ...prev, ...msg } : msg);
+    });
     const unsubscribeHistory = esp32WS.onHistory(setHistory);
 
     return () => {

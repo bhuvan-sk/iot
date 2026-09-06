@@ -67,10 +67,25 @@ const UltrasonicViz = ({ enabled }: { enabled: boolean }) => {
   );
 };
 
+
+// --- HUMIDITY SECURITY CONFIGURATION ---
+// Automatically triggers SECURITY mode if humidity goes >= THRESHOLD.
+// Automatically returns to normal mode if humidity drops < CLEAR_THRESHOLD.
+// Manual mode changes override this automatic trigger until it drops below CLEAR_THRESHOLD again.
+const HUMIDITY_SECURITY_THRESHOLD = 70;
+const HUMIDITY_SECURITY_CLEAR_THRESHOLD = 65;
+// ---------------------------------------
+
 export const Dashboard = () => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+
   const [globalMode, setGlobalMode] = useState<'NORMAL' | 'NIGHT' | 'ENTERTAINMENT' | 'SECURITY'>('NORMAL');
+  
+  // Track automatic humidity security state
+  const [humiditySecurityActive, setHumiditySecurityActive] = useState(false);
+  // Track if user manually overrode the mode while humidity was high
+  const [manualModeOverride, setManualModeOverride] = useState(false);
 
   const { latestMessage, connectionState } = useESP32WebSocket();
   const { devices, toggle } = useDevices();
@@ -110,8 +125,33 @@ export const Dashboard = () => {
   const dhtOnline = connectionState === 'connected';
   const controlOnline = import.meta.env.VITE_USE_REAL_ESP32 === 'true' ? httpChannel !== 'offline' : true;
 
+  useEffect(() => {
+    console.log('[DEBUG] Sensor State:', sensors);
+    console.log('[DEBUG] WS Latest Message:', latestMessage);
+  }, [sensors, latestMessage]);
+
   const temperature = dhtOnline ? (latestMessage?.temperature?.toFixed(1) ?? null) : null;
+
   const humidity = dhtOnline ? (latestMessage?.humidity?.toFixed(0) ?? null) : null;
+
+  // Humidity Security Trigger logic
+  useEffect(() => {
+    if (!latestMessage || typeof latestMessage.humidity !== 'number' || Number.isNaN(latestMessage.humidity)) return;
+    
+    const hum = latestMessage.humidity;
+
+    if (!humiditySecurityActive && hum >= HUMIDITY_SECURITY_THRESHOLD) {
+      setHumiditySecurityActive(true);
+      setGlobalMode('SECURITY');
+      setManualModeOverride(false);
+    } else if (humiditySecurityActive && hum < HUMIDITY_SECURITY_CLEAR_THRESHOLD) {
+      setHumiditySecurityActive(false);
+      if (globalMode === 'SECURITY' && !manualModeOverride) {
+        setGlobalMode('NORMAL');
+      }
+    }
+  }, [latestMessage?.humidity, humiditySecurityActive, globalMode, manualModeOverride]);
+
 
   const selectedRoom = selectedRoomId ? roomById(selectedRoomId) : null;
   const selectedDevice = selectedRoom ? devices.find((d) => d.id === selectedRoom.id) : undefined;
@@ -159,11 +199,21 @@ export const Dashboard = () => {
               <span className="text-[11px] font-bold tracking-[0.2em] text-white/90">SMART HOME DIGITAL TWIN</span>
             </div>
             
-            {temperature && humidity && (
-              <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-4 py-2.5 text-xs font-medium tracking-wide text-white/80 shadow-lg flex gap-3">
+                        {temperature && humidity && (
+              <div className={clsx(
+                "backdrop-blur-md border rounded-full px-4 py-2.5 text-xs font-medium tracking-wide shadow-lg flex gap-3 transition-colors duration-500",
+                humiditySecurityActive ? "bg-red-950/80 border-red-500/50 text-red-100" : "bg-black/40 border-white/10 text-white/80"
+              )}>
                 <span>{temperature}°C</span>
-                <span className="text-white/40">|</span>
-                <span>{humidity}% RH</span>
+                <span className={humiditySecurityActive ? "text-red-400/40" : "text-white/40"}>|</span>
+                {humiditySecurityActive ? (
+                  <span className="font-bold flex items-center gap-2">
+                    <Shield size={12} className="text-red-400" />
+                    SECURITY MODE <span className="text-red-400/40">•</span> HIGH HUMIDITY ({humidity}%)
+                  </span>
+                ) : (
+                  <span>{humidity}% RH</span>
+                )}
               </div>
             )}
           </div>
@@ -184,7 +234,10 @@ export const Dashboard = () => {
               {(['NORMAL', 'NIGHT', 'ENTERTAINMENT', 'SECURITY'] as const).map(mode => (
                 <button 
                   key={mode} 
-                  onClick={() => setGlobalMode(mode)}
+                  onClick={() => {
+                    setGlobalMode(mode);
+                    setManualModeOverride(true);
+                  }}
                   className={clsx(
                     "p-2 rounded-full transition-all duration-300", 
                     globalMode === mode ? "bg-white/20 text-white" : "text-white/40 hover:text-white/70"
