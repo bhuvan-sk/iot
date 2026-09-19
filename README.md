@@ -1,5 +1,7 @@
 # ESP32 Smart Home Automation Dashboard
 
+### [Start Here](https://github.com/bhuvan-sk) (Back to Profile)
+
 A real-time IoT home automation dashboard built with React and Vite that communicates directly with an ESP32 microcontroller over a local Wi-Fi network. The dashboard monitors environmental data and controls physical devices with extremely low latency using WebSockets and HTTP APIs.
 
 ## 🚀 Key Features
@@ -51,3 +53,4 @@ A real-time IoT home automation dashboard built with React and Vite that communi
 
 ## 📜 License
 MIT License
+
